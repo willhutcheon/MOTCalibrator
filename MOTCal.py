@@ -1,3 +1,30 @@
+# import RPi.GPIO as GPIO
+# import time
+
+# OUTPUT_PIN = 24      # BCM numbering
+# PULSE_TIME = 120      # seconds
+
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(OUTPUT_PIN, GPIO.OUT)
+# GPIO.output(OUTPUT_PIN, GPIO.LOW)
+
+# try:
+    # while True:
+        # cmd = input("Type START to raise pin for 60 seconds: ").strip().upper()
+        # if cmd == "START":
+            # print("Pin HIGH")
+            # GPIO.output(OUTPUT_PIN, GPIO.HIGH)
+            # time.sleep(PULSE_TIME)
+            # GPIO.output(OUTPUT_PIN, GPIO.LOW)
+            # print("Pin LOW (done)")
+        # else:
+            # print("Unknown command")
+# except KeyboardInterrupt:
+    # print("\nExiting...")
+# finally:
+    # GPIO.output(OUTPUT_PIN, GPIO.LOW)
+    # GPIO.cleanup()
+    
 import socket
 import threading
 import time
@@ -185,7 +212,8 @@ def calibrate_all(duration):
 def flash_device():
     def run_flash():
         cmd = [
-            sys.executable, "-m", "esptool",
+            "/home/cal/esp-env/bin/python", 
+            "-m", "esptool",
             "--chip", "esp32s3",
             "--port", "/dev/ttyACM0",
             "--baud", "921600",
