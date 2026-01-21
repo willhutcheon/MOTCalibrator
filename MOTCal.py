@@ -7,18 +7,23 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import scrolledtext
 import queue
+import subprocess
+import sys
 
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 5132
 SEND_PORT = 5131
 
 SESSION_THRESHOLDS = {
-    5.0: 5.1,
-    10.0: 10.1
+    5.0: 5.222,
+    10.0: 10.001
 }
 
 LOG_DIR = "/media/cal/SURFACE/motcal"
 os.makedirs(LOG_DIR, exist_ok=True)
+
+FIRMWARE_DIR = "/media/cal/SURFACE/firmware"
+os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
 devices = {}
 lock = threading.Lock()
@@ -53,6 +58,16 @@ def process_ui_queue():
 def ui_log(msg):
     log_box.insert(tk.END, msg + "\n")
     log_box.yview(tk.END)
+    
+def fw_path(filename):
+    """Return the absolute path to a firmware file."""
+    return os.path.abspath(os.path.join(FIRMWARE_DIR, filename))
+    
+def log_fw_path(filename):
+    """Log the absolute firmware path to the GUI log box."""
+    full_path = fw_path(filename)
+    schedule_ui(lambda: ui_log(f"Firmware file: {full_path}"))
+    return full_path
 
 def update_device_display():
     for w in device_frame.winfo_children():
@@ -166,6 +181,44 @@ def calibrate_all(duration):
     schedule_ui(lambda: ui_log(f"Starting {duration}s calibration"))
     for ip in list(devices.keys()):
         send_udp(ip, "PRESS_START_SESSION")
+        
+def flash_device():
+    def run_flash():
+        cmd = [
+            sys.executable, "-m", "esptool",
+            "--chip", "esp32s3",
+            "--port", "/dev/ttyACM0",
+            "--baud", "921600",
+            "--before", "default-reset",
+            "--after", "hard-reset",
+            "write-flash",
+            "--compress",
+            "--flash-mode", "keep",
+            "--flash-freq", "keep",
+            "--flash-size", "keep",
+            "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
+            "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
+            "0xe000", fw_path("boot_app0.bin"),
+            "0x10000", fw_path("mot-1.0.1.bin"),
+        ]
+        schedule_ui(lambda: ui_log("=== FLASH STARTED ==="))
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            for line in proc.stdout:
+                schedule_ui(lambda l=line.rstrip(): ui_log(l))
+            rc = proc.wait()
+            schedule_ui(lambda: ui_log(
+                "=== FLASH SUCCESS ===" if rc == 0 else "=== FLASH FAILED ==="
+            ))
+        except Exception as e:
+            schedule_ui(lambda: ui_log(f"FLASH ERROR: {e}"))
+    threading.Thread(target=run_flash, daemon=True).start()
 
 tk.Label(
     root, text="MOT CALIBRATOR",
@@ -190,6 +243,13 @@ tk.Button(
     root, text="10 SECOND CALIBRATION",
     font=("Arial", 14),
     command=lambda: calibrate_all(10.0),
+    width=25
+).pack(pady=3)
+
+tk.Button(
+    root, text="FLASH DEVICE",
+    font=("Arial", 14),
+    command=flash_device,
     width=25
 ).pack(pady=3)
 
