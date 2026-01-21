@@ -1,30 +1,3 @@
-# import RPi.GPIO as GPIO
-# import time
-
-# OUTPUT_PIN = 24      # BCM numbering
-# PULSE_TIME = 120      # seconds
-
-# GPIO.setmode(GPIO.BCM)
-# GPIO.setup(OUTPUT_PIN, GPIO.OUT)
-# GPIO.output(OUTPUT_PIN, GPIO.LOW)
-
-# try:
-    # while True:
-        # cmd = input("Type START to raise pin for 60 seconds: ").strip().upper()
-        # if cmd == "START":
-            # print("Pin HIGH")
-            # GPIO.output(OUTPUT_PIN, GPIO.HIGH)
-            # time.sleep(PULSE_TIME)
-            # GPIO.output(OUTPUT_PIN, GPIO.LOW)
-            # print("Pin LOW (done)")
-        # else:
-            # print("Unknown command")
-# except KeyboardInterrupt:
-    # print("\nExiting...")
-# finally:
-    # GPIO.output(OUTPUT_PIN, GPIO.LOW)
-    # GPIO.cleanup()
-    
 import socket
 import threading
 import time
@@ -36,6 +9,8 @@ from tkinter import scrolledtext
 import queue
 import subprocess
 import sys
+import RPi.GPIO as GPIO
+import threading
 
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 5132
@@ -61,6 +36,13 @@ root.title("MOT Calibrator")
 root.geometry(f"{WIDTH}x{HEIGHT}")
 root.configure(bg="black")
 
+OUTPUT_PIN = 24      # BCM numbering
+PULSE_TIME = 1       # seconds
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(OUTPUT_PIN, GPIO.OUT)
+GPIO.output(OUTPUT_PIN, GPIO.LOW)
+
 device_count_var = tk.StringVar(value="Devices: 0")
 
 log_box = scrolledtext.ScrolledText(
@@ -85,16 +67,24 @@ def process_ui_queue():
 def ui_log(msg):
     log_box.insert(tk.END, msg + "\n")
     log_box.yview(tk.END)
-    
+
 def fw_path(filename):
     """Return the absolute path to a firmware file."""
     return os.path.abspath(os.path.join(FIRMWARE_DIR, filename))
-    
+
 def log_fw_path(filename):
     """Log the absolute firmware path to the GUI log box."""
     full_path = fw_path(filename)
     schedule_ui(lambda: ui_log(f"Firmware file: {full_path}"))
     return full_path
+    
+def pulse_pin():
+    """Threaded function to raise pin for PULSE_TIME seconds."""
+    schedule_ui(lambda: ui_log("Raising pin HIGH..."))
+    GPIO.output(OUTPUT_PIN, GPIO.HIGH)
+    time.sleep(PULSE_TIME)
+    GPIO.output(OUTPUT_PIN, GPIO.LOW)
+    schedule_ui(lambda: ui_log("Pin LOW (done)"))
 
 def update_device_display():
     for w in device_frame.winfo_children():
@@ -208,11 +198,21 @@ def calibrate_all(duration):
     schedule_ui(lambda: ui_log(f"Starting {duration}s calibration"))
     for ip in list(devices.keys()):
         send_udp(ip, "PRESS_START_SESSION")
-        
+
+def update_flash_button_state():
+    files = os.listdir(FIRMWARE_DIR)
+    has_files = any(f.endswith(".bin") for f in files)
+    if has_files:
+        flash_btn.config(state=tk.NORMAL)
+    else:
+        flash_btn.config(state=tk.DISABLED)
+    # Schedule the next check in 2 seconds
+    root.after(2000, update_flash_button_state)
+
 def flash_device():
     def run_flash():
         cmd = [
-            "/home/cal/esp-env/bin/python", 
+            "/home/cal/esp-env/bin/python",
             "-m", "esptool",
             "--chip", "esp32s3",
             "--port", "/dev/ttyACM0",
@@ -275,12 +275,24 @@ tk.Button(
 ).pack(pady=3)
 
 tk.Button(
+    root,
+    text=f"RAISE PIN FOR {PULSE_TIME} SECOND",
+    font=("Arial", 14),
+    command=lambda: threading.Thread(target=pulse_pin, daemon=True).start(),
+    width=25
+).pack(pady=3)
+
+flash_btn = tk.Button(
     root, text="FLASH DEVICE",
     font=("Arial", 14),
     command=flash_device,
     width=25
-).pack(pady=3)
+)
+flash_btn.pack(pady=3)
 
 threading.Thread(target=listen_udp, daemon=True).start()
 root.after(50, process_ui_queue)
+
+update_flash_button_state()
+
 root.mainloop()
