@@ -65,6 +65,46 @@ def pulse_pin():
     time.sleep(PULSE_TIME)
     GPIO.output(OUTPUT_PIN, GPIO.LOW)
 
+DEVICE_LIST_HEIGHT = 80
+device_container = tk.Frame(root, bg="black", height=DEVICE_LIST_HEIGHT)
+device_container.pack(fill="both", expand=True, padx=5, pady=5)
+device_container.pack_propagate(False)
+
+device_canvas = tk.Canvas(
+    device_container,
+    bg="black",
+    highlightthickness=0
+)
+device_canvas.pack(side="left", fill="both", expand=True)
+
+device_scrollbar = tk.Scrollbar(
+    device_container,
+    orient="vertical",
+    command=device_canvas.yview
+)
+device_scrollbar.pack(side="right", fill="y")
+
+device_canvas.configure(yscrollcommand=device_scrollbar.set)
+device_frame = tk.Frame(device_canvas, bg="black")
+
+device_canvas.create_window(
+    (0, 0),
+    window=device_frame,
+    anchor="nw"
+)
+
+def on_device_frame_configure(event):
+    device_canvas.configure(
+        scrollregion=device_canvas.bbox("all")
+    )
+
+device_frame.bind("<Configure>", on_device_frame_configure)
+
+def _on_mousewheel(event):
+    device_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+device_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
 def update_device_display():
     for w in device_frame.winfo_children():
         w.destroy()
@@ -83,8 +123,9 @@ def update_device_display():
                 text=text,
                 fg=color,
                 bg="black",
-                font=("Arial", 10)
-            ).pack(anchor="w")
+                font=("Arial", 10),
+                anchor="w"
+            ).pack(fill="x", padx=5)
     device_count_var.set(f"Devices: {len(devices)}")
 
 def extract_device_id(msg):
@@ -193,21 +234,17 @@ def flash_device():
             "0xe000", fw_path("boot_app0.bin"),
             "0x10000", fw_path("mot-1.0.1.bin"),
         ]
-        try:
-            rc = subprocess.call(cmd)
-            schedule_ui(lambda: set_flash_status(
-                "SUCCESS" if rc == 0 else "FAILED"
-            ))
-        except Exception:
-            schedule_ui(lambda: set_flash_status("FAILED"))
-
+        rc = subprocess.call(cmd)
+        schedule_ui(lambda: set_flash_status(
+            "SUCCESS" if rc == 0 else "FAILED"
+        ))
     threading.Thread(target=run_flash, daemon=True).start()
 
-tk.Label(
-    root, text="MOT CALIBRATOR",
-    fg="white", bg="black",
-    font=("Arial", 18, "bold")
-).pack(pady=5)
+# tk.Label(
+    # root, text="MOT CALIBRATOR",
+    # fg="white", bg="black",
+    # font=("Arial", 18, "bold")
+# ).pack(pady=5)
 
 tk.Label(
     root, textvariable=device_count_var,
@@ -223,9 +260,6 @@ flash_status_label = tk.Label(
     font=("Arial", 12, "bold")
 )
 flash_status_label.pack(pady=2)
-
-device_frame = tk.Frame(root, bg="black")
-device_frame.pack(fill="both", expand=True)
 
 tk.Button(
     root, text="5 SECOND CALIBRATION",
