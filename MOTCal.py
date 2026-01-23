@@ -8,6 +8,9 @@ import tkinter as tk
 import queue
 import subprocess
 import RPi.GPIO as GPIO
+import glob
+import re
+from packaging.version import Version
 
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 5132
@@ -25,11 +28,13 @@ os.makedirs(FIRMWARE_DIR, exist_ok=True)
 devices = {}
 lock = threading.Lock()
 WIDTH, HEIGHT = 480, 320
+# WIDTH, HEIGHT = 320, 480
 root = tk.Tk()
 root.title("MOT Calibrator")
 root.geometry(f"{WIDTH}x{HEIGHT}")
 root.configure(bg="black")
-OUTPUT_PIN = 24
+#OUTPUT_PIN = 24
+OUTPUT_PIN = 16
 PULSE_TIME = 1
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(OUTPUT_PIN, GPIO.OUT)
@@ -239,6 +244,83 @@ def flash_device():
             "SUCCESS" if rc == 0 else "FAILED"
         ))
     threading.Thread(target=run_flash, daemon=True).start()
+    
+def find_latest_firmware():
+    pattern = re.compile(r"^mot-1\.0\.\d+\.bin$")
+    candidates = []
+    for fname in os.listdir(FIRMWARE_DIR):
+        if pattern.match(fname):
+            version_str = fname.replace("mot-", "").replace(".bin", "")
+            candidates.append((Version(version_str), fname))
+    if not candidates:
+        raise FileNotFoundError("No mot-1.0.x.bin firmware files found")
+    # Sort by version and return newest
+    candidates.sort(key=lambda x: x[0])
+    return os.path.join(FIRMWARE_DIR, candidates[-1][1])
+
+def flash_device():
+    def run_flash():
+        try:
+            set_flash_status("IN PROGRESS")
+            firmware_file = find_latest_firmware()
+            print(f"Flashing firmware: {os.path.basename(firmware_file)}")
+            cmd = [
+                "/home/cal/esp-env/bin/python", "-m", "esptool",
+                "--chip", "esp32s3",
+                "--port", "/dev/ttyACM0",
+                "--baud", "921600",
+                "write-flash",
+                "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
+                "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
+                "0xe000", fw_path("boot_app0.bin"),
+                "0x10000", firmware_file,
+            ]
+            rc = subprocess.call(cmd)
+            set_flash_status("SUCCESS" if rc == 0 else "FAILED")
+        except Exception as e:
+            print("Flash error:", e)
+            set_flash_status("FAILED")
+    threading.Thread(target=run_flash, daemon=True).start()
+
+# def extract_version(filename):
+    # """
+    # Extracts version tuple from filename like:
+    # mot-1.0.10.bin -> (1, 0, 10)
+    # """
+    # match = re.search(r"mot-(\d+(?:\.\d+)*)\.bin", filename)
+    # if not match:
+        # return ()
+    # return tuple(int(x) for x in match.group(1).split("."))
+    
+#will test
+# def flash_device():
+    # def run_flash():
+        # #schedule_ui(lambda: set_flash_status("IN PROGRESS"))
+        # # Find all matching firmware files
+        # matches = glob.glob(os.path.join(FIRMWARE_DIR, "mot-*.bin"))
+        # # if not matches:
+            # # schedule_ui(lambda: set_flash_status("NO FW FOUND"))
+            # # return
+        # # Sort by extracted version (highest wins)
+        # matches.sort(key=lambda f: extract_version(os.path.basename(f)))
+        # app_bin = matches[-1]  # latest version
+        # #schedule_ui(lambda: ui_log(f"Using firmware: {os.path.basename(app_bin)}"))
+        # cmd = [
+            # "/home/cal/esp-env/bin/python", "-m", "esptool",
+            # "--chip", "esp32s3",
+            # "--port", "/dev/ttyACM0",
+            # "--baud", "921600",
+            # "write-flash",
+            # "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
+            # "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
+            # "0xe000", fw_path("boot_app0.bin"),
+            # "0x10000", app_bin,
+        # ]
+        # rc = subprocess.call(cmd)
+        # # schedule_ui(lambda: set_flash_status(
+            # # "SUCCESS" if rc == 0 else "FAILED"
+        # # ))
+    # threading.Thread(target=run_flash, daemon=True).start()
 
 # tk.Label(
     # root, text="MOT CALIBRATOR",
@@ -268,12 +350,12 @@ tk.Button(
     width=25
 ).pack(pady=3)
 
-tk.Button(
-    root, text="10 SECOND CALIBRATION",
-    font=("Arial", 14),
-    command=lambda: calibrate_all(10.0),
-    width=25
-).pack(pady=3)
+# tk.Button(
+    # root, text="10 SECOND CALIBRATION",
+    # font=("Arial", 14),
+    # command=lambda: calibrate_all(10.0),
+    # width=25
+# ).pack(pady=3)
 
 tk.Button(
     root, text=f"RAISE PIN FOR {PULSE_TIME} SECOND",
