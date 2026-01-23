@@ -8,7 +8,6 @@ import tkinter as tk
 import queue
 import subprocess
 import RPi.GPIO as GPIO
-import glob
 import re
 from packaging.version import Version
 
@@ -22,25 +21,54 @@ SESSION_THRESHOLDS = {
 }
 
 LOG_DIR = "/media/cal/SURFACE/motcal"
-os.makedirs(LOG_DIR, exist_ok=True)
 FIRMWARE_DIR = "/media/cal/SURFACE/firmware"
+os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
-devices = {}
-lock = threading.Lock()
-WIDTH, HEIGHT = 480, 320
-# WIDTH, HEIGHT = 320, 480
-root = tk.Tk()
-root.title("MOT Calibrator")
-root.geometry(f"{WIDTH}x{HEIGHT}")
-root.configure(bg="black")
-#OUTPUT_PIN = 24
+
 OUTPUT_PIN = 16
 PULSE_TIME = 1
+
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(OUTPUT_PIN, GPIO.OUT)
 GPIO.output(OUTPUT_PIN, GPIO.LOW)
+
+root = tk.Tk()
+root.title("MOT Calibrator")
+root.attributes("-fullscreen", True)
+root.configure(bg="black", cursor="none")
+
+def exit_app():
+    GPIO.cleanup()
+    root.destroy()
+
+root.bind("<Escape>", lambda e: exit_app())
+
+exit_btn = tk.Button(
+    root,
+    text="✕",
+    font=("Arial", 18, "bold"),
+    fg="white",
+    bg="red",
+    command=exit_app,
+    bd=0,
+    width=3,
+    height=1
+)
+exit_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-5, y=5)
+
+devices = {}
+lock = threading.Lock()
+ui_queue = queue.Queue()
 device_count_var = tk.StringVar(value="Devices: 0")
 flash_status_var = tk.StringVar(value="FLASH: IDLE")
+
+def schedule_ui(fn):
+    ui_queue.put(fn)
+
+def process_ui_queue():
+    while not ui_queue.empty():
+        ui_queue.get()()
+    root.after(50, process_ui_queue)
 
 def set_flash_status(state):
     flash_status_var.set(f"FLASH: {state}")
@@ -52,56 +80,20 @@ def set_flash_status(state):
         )
     )
 
-ui_queue = queue.Queue()
-
-def schedule_ui(fn):
-    ui_queue.put(fn)
-
-def process_ui_queue():
-    while not ui_queue.empty():
-        ui_queue.get()()
-    root.after(50, process_ui_queue)
-
-def fw_path(filename):
-    return os.path.abspath(os.path.join(FIRMWARE_DIR, filename))
-
-def pulse_pin():
-    GPIO.output(OUTPUT_PIN, GPIO.HIGH)
-    time.sleep(PULSE_TIME)
-    GPIO.output(OUTPUT_PIN, GPIO.LOW)
-
 DEVICE_LIST_HEIGHT = 80
 device_container = tk.Frame(root, bg="black", height=DEVICE_LIST_HEIGHT)
 device_container.pack(fill="both", expand=True, padx=5, pady=5)
 device_container.pack_propagate(False)
-
-device_canvas = tk.Canvas(
-    device_container,
-    bg="black",
-    highlightthickness=0
-)
+device_canvas = tk.Canvas(device_container, bg="black", highlightthickness=0)
 device_canvas.pack(side="left", fill="both", expand=True)
-
-device_scrollbar = tk.Scrollbar(
-    device_container,
-    orient="vertical",
-    command=device_canvas.yview
-)
+device_scrollbar = tk.Scrollbar(device_container, orient="vertical", command=device_canvas.yview)
 device_scrollbar.pack(side="right", fill="y")
-
 device_canvas.configure(yscrollcommand=device_scrollbar.set)
 device_frame = tk.Frame(device_canvas, bg="black")
-
-device_canvas.create_window(
-    (0, 0),
-    window=device_frame,
-    anchor="nw"
-)
+device_canvas.create_window((0, 0), window=device_frame, anchor="nw")
 
 def on_device_frame_configure(event):
-    device_canvas.configure(
-        scrollregion=device_canvas.bbox("all")
-    )
+    device_canvas.configure(scrollregion=device_canvas.bbox("all"))
 
 device_frame.bind("<Configure>", on_device_frame_configure)
 
@@ -183,7 +175,6 @@ def handle_mot_message(ip, msg):
         dev = devices[ip]
     if msg.endswith("PRESS_START_SESSION_ACK"):
         dev["session_start"] = time.monotonic()
-        dev["state"] = "RUNNING"
         send_udp(ip, "PRESS_1")
         threading.Thread(target=delayed_stop, args=(ip,), daemon=True).start()
     elif msg.endswith("PRESS_STOP_SESSION_ACK"):
@@ -192,9 +183,7 @@ def handle_mot_message(ip, msg):
             dev["measured"] = elapsed
             threshold = SESSION_THRESHOLDS[dev["duration"]]
             dev["result"] = "PASS" if elapsed <= threshold else "FAIL"
-            log(dev, "PI", f"MEASURED_DURATION={elapsed:.6f}")
             dev["session_start"] = None
-            dev["state"] = "IDLE"
             schedule_ui(update_device_display)
 
 def send_udp(ip, message):
@@ -220,31 +209,6 @@ def calibrate_all(duration):
     for ip in list(devices.keys()):
         send_udp(ip, "PRESS_START_SESSION")
 
-def update_flash_button_state():
-    has_bin = any(f.endswith(".bin") for f in os.listdir(FIRMWARE_DIR))
-    flash_btn.config(state=tk.NORMAL if has_bin else tk.DISABLED)
-    root.after(2000, update_flash_button_state)
-
-def flash_device():
-    def run_flash():
-        schedule_ui(lambda: set_flash_status("IN PROGRESS"))
-        cmd = [
-            "/home/cal/esp-env/bin/python", "-m", "esptool",
-            "--chip", "esp32s3",
-            "--port", "/dev/ttyACM0",
-            "--baud", "921600",
-            "write-flash",
-            "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
-            "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
-            "0xe000", fw_path("boot_app0.bin"),
-            "0x10000", fw_path("mot-1.0.1.bin"),
-        ]
-        rc = subprocess.call(cmd)
-        schedule_ui(lambda: set_flash_status(
-            "SUCCESS" if rc == 0 else "FAILED"
-        ))
-    threading.Thread(target=run_flash, daemon=True).start()
-    
 def find_latest_firmware():
     pattern = re.compile(r"^mot-1\.0\.\d+\.bin$")
     candidates = []
@@ -253,27 +217,26 @@ def find_latest_firmware():
             version_str = fname.replace("mot-", "").replace(".bin", "")
             candidates.append((Version(version_str), fname))
     if not candidates:
-        raise FileNotFoundError("No mot-1.0.x.bin firmware files found")
-    # Sort by version and return newest
+        raise FileNotFoundError("No firmware found")
     candidates.sort(key=lambda x: x[0])
     return os.path.join(FIRMWARE_DIR, candidates[-1][1])
+
 
 def flash_device():
     def run_flash():
         try:
             set_flash_status("IN PROGRESS")
-            firmware_file = find_latest_firmware()
-            print(f"Flashing firmware: {os.path.basename(firmware_file)}")
+            fw = find_latest_firmware()
             cmd = [
                 "/home/cal/esp-env/bin/python", "-m", "esptool",
                 "--chip", "esp32s3",
                 "--port", "/dev/ttyACM0",
                 "--baud", "921600",
                 "write-flash",
-                "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
-                "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
-                "0xe000", fw_path("boot_app0.bin"),
-                "0x10000", firmware_file,
+                "0x0", os.path.join(FIRMWARE_DIR, "mot-firmware.ino.bootloader.bin"),
+                "0x8000", os.path.join(FIRMWARE_DIR, "mot-firmware.ino.partitions.bin"),
+                "0xe000", os.path.join(FIRMWARE_DIR, "boot_app0.bin"),
+                "0x10000", fw,
             ]
             rc = subprocess.call(cmd)
             set_flash_status("SUCCESS" if rc == 0 else "FAILED")
@@ -282,97 +245,13 @@ def flash_device():
             set_flash_status("FAILED")
     threading.Thread(target=run_flash, daemon=True).start()
 
-# def extract_version(filename):
-    # """
-    # Extracts version tuple from filename like:
-    # mot-1.0.10.bin -> (1, 0, 10)
-    # """
-    # match = re.search(r"mot-(\d+(?:\.\d+)*)\.bin", filename)
-    # if not match:
-        # return ()
-    # return tuple(int(x) for x in match.group(1).split("."))
-    
-#will test
-# def flash_device():
-    # def run_flash():
-        # #schedule_ui(lambda: set_flash_status("IN PROGRESS"))
-        # # Find all matching firmware files
-        # matches = glob.glob(os.path.join(FIRMWARE_DIR, "mot-*.bin"))
-        # # if not matches:
-            # # schedule_ui(lambda: set_flash_status("NO FW FOUND"))
-            # # return
-        # # Sort by extracted version (highest wins)
-        # matches.sort(key=lambda f: extract_version(os.path.basename(f)))
-        # app_bin = matches[-1]  # latest version
-        # #schedule_ui(lambda: ui_log(f"Using firmware: {os.path.basename(app_bin)}"))
-        # cmd = [
-            # "/home/cal/esp-env/bin/python", "-m", "esptool",
-            # "--chip", "esp32s3",
-            # "--port", "/dev/ttyACM0",
-            # "--baud", "921600",
-            # "write-flash",
-            # "0x0", fw_path("mot-firmware.ino.bootloader.bin"),
-            # "0x8000", fw_path("mot-firmware.ino.partitions.bin"),
-            # "0xe000", fw_path("boot_app0.bin"),
-            # "0x10000", app_bin,
-        # ]
-        # rc = subprocess.call(cmd)
-        # # schedule_ui(lambda: set_flash_status(
-            # # "SUCCESS" if rc == 0 else "FAILED"
-        # # ))
-    # threading.Thread(target=run_flash, daemon=True).start()
-
-# tk.Label(
-    # root, text="MOT CALIBRATOR",
-    # fg="white", bg="black",
-    # font=("Arial", 18, "bold")
-# ).pack(pady=5)
-
-tk.Label(
-    root, textvariable=device_count_var,
-    fg="white", bg="black",
-    font=("Arial", 10)
-).pack()
-
-flash_status_label = tk.Label(
-    root,
-    textvariable=flash_status_var,
-    fg="yellow",
-    bg="black",
-    font=("Arial", 12, "bold")
-)
+tk.Label(root, textvariable=device_count_var, fg="white", bg="black").pack()
+flash_status_label = tk.Label(root, textvariable=flash_status_var, fg="yellow", bg="black", font=("Arial", 12, "bold"))
 flash_status_label.pack(pady=2)
-
-tk.Button(
-    root, text="5 SECOND CALIBRATION",
-    font=("Arial", 14),
-    command=lambda: calibrate_all(5.0),
-    width=25
-).pack(pady=3)
-
-# tk.Button(
-    # root, text="10 SECOND CALIBRATION",
-    # font=("Arial", 14),
-    # command=lambda: calibrate_all(10.0),
-    # width=25
-# ).pack(pady=3)
-
-tk.Button(
-    root, text=f"RAISE PIN FOR {PULSE_TIME} SECOND",
-    font=("Arial", 14),
-    command=lambda: threading.Thread(target=pulse_pin, daemon=True).start(),
-    width=25
-).pack(pady=3)
-
-flash_btn = tk.Button(
-    root, text="FLASH DEVICE",
-    font=("Arial", 14),
-    command=flash_device,
-    width=25
-)
+tk.Button(root, text="5 SECOND CALIBRATION", font=("Arial", 14), width=25, command=lambda: calibrate_all(5.0)).pack(pady=3)
+tk.Button(root, text=f"RAISE PIN FOR {PULSE_TIME} SECOND", font=("Arial", 14), width=25, command=lambda: threading.Thread(target=lambda: (GPIO.output(OUTPUT_PIN, GPIO.HIGH), time.sleep(PULSE_TIME), GPIO.output(OUTPUT_PIN, GPIO.LOW)), daemon=True).start()).pack(pady=3)
+flash_btn = tk.Button(root, text="FLASH DEVICE", font=("Arial", 14), width=25, command=flash_device)
 flash_btn.pack(pady=3)
-
 threading.Thread(target=listen_udp, daemon=True).start()
 root.after(50, process_ui_queue)
-update_flash_button_state()
 root.mainloop()
