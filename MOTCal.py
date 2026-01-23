@@ -39,6 +39,9 @@ root.configure(bg="black", cursor="none")
 
 def exit_app():
     GPIO.cleanup()
+    subprocess.call(
+        ["sudo", "systemctl", "stop", "mot-calibrator.service"]
+    )
     root.destroy()
 
 root.bind("<Escape>", lambda e: exit_app())
