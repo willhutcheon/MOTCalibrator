@@ -24,7 +24,7 @@ WantedBy=graphical.target
                                     sudo systemctl start mot-calibrator.service
 6. To stop -> sudo systemctl stop mot-calibrator.service
 7. Other helpful commands -> sudo systemctl set-default graphical.target sudo reboot (for setting target screen when changing between screens) <br>
-&nbsp;&nbsp;&nbsp;&nbsp                             cd ~/LCD-show <br>
+&nbsp;&nbsp;&nbsp;&nbs;                             cd ~/LCD-show <br>
                              sudo ./LCD-hdmi <br>
                              sudo ./MHS35-show
 
