@@ -10,14 +10,14 @@ Type=simple <br>
 User=cal <br>
 Group=cal <br>
 WorkingDirectory=/home/cal/Documents <br>
-ExecStart=/usr/bin/python3 /home/cal/Documents/MOTCal.py
-Restart=always
-RestartSec=2
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/cal/.Xauthority
-StandardOutput=journal
-StandardError=journal
-[Install]
+ExecStart=/usr/bin/python3 /home/cal/Documents/MOTCal.py <br>
+Restart=always <br>
+RestartSec=2 <br>
+Environment=DISPLAY=:0 <br>
+Environment=XAUTHORITY=/home/cal/.Xauthority <br>
+StandardOutput=journal <br>
+StandardError=journal <br>
+[Install] <br>
 WantedBy=graphical.target
 5. Reload and enable the service -> sudo systemctl daemon-reload <br>
                                     sudo systemctl enable mot-calibrator.service <br>
