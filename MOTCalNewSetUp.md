@@ -19,7 +19,7 @@ StandardOutput=journal
 StandardError=journal
 [Install]
 WantedBy=graphical.target
-5. Reload and enable the service -> sudo systemctl daemon-reload
+5. Reload and enable the service -> sudo systemctl daemon-reload <br>
                                     sudo systemctl enable mot-calibrator.service
                                     sudo systemctl start mot-calibrator.service
 6. To stop -> sudo systemctl stop mot-calibrator.service
