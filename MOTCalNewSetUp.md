@@ -23,9 +23,9 @@ WantedBy=graphical.target
                                     sudo systemctl enable mot-calibrator.service <br>
                                     sudo systemctl start mot-calibrator.service
 6. To stop -> sudo systemctl stop mot-calibrator.service
-7. Other helpful commands -> sudo systemctl set-default graphical.target sudo reboot (for setting target screen when changing between screens)
-                             cd ~/LCD-show
-                             sudo ./LCD-hdmi
+7. Other helpful commands -> sudo systemctl set-default graphical.target sudo reboot (for setting target screen when changing between screens) <br>
+                             > cd ~/LCD-show <br>
+                             sudo ./LCD-hdmi <br>
                              sudo ./MHS35-show
 
 NOTE: one thing I might be missing here is how to get esptool running in the venv, will look into what commands were used if any soon.
